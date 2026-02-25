@@ -62,9 +62,12 @@ pub struct Precheck {
     /// Specify which checks to run
     #[clap(flatten)]
     stage: Option<Stage>,
-    /// Skip TOML formatting
+    /// Skip taplo (TOML formatting)
     #[clap(long)]
-    pub skip_toml: bool,
+    pub skip_taplo: bool,
+    /// Skip audit
+    #[clap(long)]
+    pub skip_audit: bool,
     /// Skip Clang formatting
     #[clap(long)]
     pub skip_clang: bool,
@@ -118,6 +121,8 @@ impl Xtask for Precheck {
             let setup = setup::Setup {
                 force: false,
                 config: Some(config_path),
+                skip_taplo: self.skip_taplo,
+                skip_audit: self.skip_audit,
             };
             setup.run(ctx.clone())?;
         }
@@ -129,7 +134,7 @@ impl Xtask for Precheck {
         }
 
         // Run Audit
-        if stage.audit || stage.all {
+        if (stage.audit || stage.all) && !self.skip_audit {
             let audit = audit::Audit {};
             audit.run(ctx.clone())?;
         }
@@ -138,7 +143,7 @@ impl Xtask for Precheck {
         if stage.fmt || stage.all {
             let fmt = fmt::Fmt {
                 fix: false,                  // Do not fix formatting issues by default
-                skip_toml: self.skip_toml,   // Pass through skip_toml flag
+                skip_taplo: self.skip_taplo, // Pass through skip_taplo flag
                 skip_clang: self.skip_clang, // Pass through skip_clang flag
                 toolchain: if self.skip_toolchain {
                     None

@@ -4,14 +4,14 @@
 #include <azihsm_api.h>
 #include <cstring>
 #include <gtest/gtest.h>
-#include <scope_guard.hpp>
 #include <vector>
-
+#include "helpers.hpp"
 #include "handle/key_handle.hpp"
 #include "handle/part_handle.hpp"
 #include "handle/part_list_handle.hpp"
 #include "handle/session_handle.hpp"
 #include "utils/auto_ctx.hpp"
+#include "utils/auto_key.hpp"
 #include <functional>
 
 class azihsm_aes_xts : public ::testing::Test
@@ -250,25 +250,6 @@ class azihsm_aes_xts : public ::testing::Test
         ASSERT_EQ(decrypted.size(), plaintext_len);
         ASSERT_EQ(std::memcmp(decrypted.data(), plaintext, plaintext_len), 0);
     }
-
-    // Helper to generate AES-XTS key
-    static KeyHandle generate_aes_xts_key(azihsm_handle session)
-    {
-        azihsm_algo keygen_algo{};
-        keygen_algo.id = AZIHSM_ALGO_ID_AES_XTS_KEY_GEN;
-        keygen_algo.params = nullptr;
-        keygen_algo.len = 0;
-
-        key_props props;
-        props.key_kind = AZIHSM_KEY_KIND_AES_XTS;
-        props.key_class = AZIHSM_KEY_CLASS_SECRET;
-        props.bits = 512;  // AES-256 XTS requires 512 bits
-        props.is_session = true;
-        props.can_encrypt = true;
-        props.can_decrypt = true;
-
-        return KeyHandle(session, &keygen_algo, props);
-    }
 };
 
 // Test: verify we can generate an XTS key (manual API calls)
@@ -301,17 +282,11 @@ TEST_F(azihsm_aes_xts, GenerateXtsKey)
             .count = static_cast<uint32_t>(props_vec.size())
         };
 
-        azihsm_handle key_handle = 0;
-        azihsm_status err = azihsm_key_gen(session, &keygen_algo, &prop_list, &key_handle);
+        auto_key key_handle;
+        azihsm_status err = azihsm_key_gen(session, &keygen_algo, &prop_list, key_handle.get_ptr());
         
         ASSERT_EQ(err, AZIHSM_STATUS_SUCCESS) << "Key generation failed with error: " << err;
         ASSERT_NE(key_handle, 0);
-
-        auto cleanup = scope_guard::make_scope_exit([key_handle] {
-            if (key_handle != 0) {
-                azihsm_key_delete(key_handle);
-            }
-        });
     });
 }
 
@@ -320,7 +295,7 @@ TEST_F(azihsm_aes_xts, EncryptDecryptRoundtrip)
 {
     part_list_.for_each_session([this](azihsm_handle session) {
         // Generate AES-XTS key
-        KeyHandle key = generate_aes_xts_key(session);
+        KeyHandle key = generate_aes_xts_key(session, 512);
         ASSERT_NE(key.get(), 0);
 
         // Test with 512 bytes of plaintext (must be >= 16 bytes for XTS)
@@ -345,7 +320,7 @@ TEST_F(azihsm_aes_xts, EncryptDecryptRoundtrip)
 TEST_F(azihsm_aes_xts, streaming_exact_blocks)
 {
     part_list_.for_each_session([this](azihsm_handle session) {
-        KeyHandle key = generate_aes_xts_key(session);
+        KeyHandle key = generate_aes_xts_key(session, 512);
 
         // 512 bytes of plaintext (DUL = 512)
         std::vector<uint8_t> plaintext(512);
@@ -371,7 +346,7 @@ TEST_F(azihsm_aes_xts, streaming_exact_blocks)
 TEST_F(azihsm_aes_xts, streaming_multiple_data_units)
 {
     part_list_.for_each_session([this](azihsm_handle session) {
-        KeyHandle key = generate_aes_xts_key(session);
+        KeyHandle key = generate_aes_xts_key(session, 512);
 
         // 1024 bytes total, DUL = 256, so 4 data units
         std::vector<uint8_t> plaintext(1024);
@@ -396,7 +371,7 @@ TEST_F(azihsm_aes_xts, streaming_multiple_data_units)
 TEST_F(azihsm_aes_xts, streaming_single_data_unit_chunks)
 {
     part_list_.for_each_session([this](azihsm_handle session) {
-        KeyHandle key = generate_aes_xts_key(session);
+        KeyHandle key = generate_aes_xts_key(session, 512);
 
         // 512 bytes total, DUL = 128, so 4 data units
         std::vector<uint8_t> plaintext(512);
@@ -421,7 +396,7 @@ TEST_F(azihsm_aes_xts, streaming_single_data_unit_chunks)
 TEST_F(azihsm_aes_xts, single_shot_encrypt_streaming_decrypt)
 {
     part_list_.for_each_session([this](azihsm_handle session) {
-        KeyHandle key = generate_aes_xts_key(session);
+        KeyHandle key = generate_aes_xts_key(session, 512);
 
         const size_t plaintext_len = 512;
         const size_t dul = 128;  // Same DUL for both operations
@@ -459,7 +434,7 @@ TEST_F(azihsm_aes_xts, single_shot_encrypt_streaming_decrypt)
 TEST_F(azihsm_aes_xts, streaming_encrypt_single_shot_decrypt)
 {
     part_list_.for_each_session([this](azihsm_handle session) {
-        KeyHandle key = generate_aes_xts_key(session);
+        KeyHandle key = generate_aes_xts_key(session, 512);
 
         const size_t plaintext_len = 512;
         const size_t dul = 128;  // Same DUL for both operations
@@ -497,7 +472,7 @@ TEST_F(azihsm_aes_xts, streaming_encrypt_single_shot_decrypt)
 TEST_F(azihsm_aes_xts, different_tweaks_different_ciphertexts)
 {
     part_list_.for_each_session([this](azihsm_handle session) {
-        KeyHandle key = generate_aes_xts_key(session);
+        KeyHandle key = generate_aes_xts_key(session, 512);
 
         const size_t plaintext_len = 256;
         std::vector<uint8_t> plaintext(plaintext_len, 0xAB);
@@ -538,7 +513,7 @@ TEST_F(azihsm_aes_xts, different_tweaks_different_ciphertexts)
 TEST_F(azihsm_aes_xts, tweak_updated_after_encryption)
 {
     part_list_.for_each_session([this](azihsm_handle session) {
-        KeyHandle key = generate_aes_xts_key(session);
+        KeyHandle key = generate_aes_xts_key(session, 512);
 
         const size_t plaintext_len = 128;
         std::vector<uint8_t> plaintext(plaintext_len, 0xCC);
@@ -566,7 +541,7 @@ TEST_F(azihsm_aes_xts, tweak_updated_after_encryption)
 TEST_F(azihsm_aes_xts, minimum_plaintext_size)
 {
     part_list_.for_each_session([this](azihsm_handle session) {
-        KeyHandle key = generate_aes_xts_key(session);
+        KeyHandle key = generate_aes_xts_key(session, 512);
 
         const size_t plaintext_len = 16;
         std::vector<uint8_t> plaintext(plaintext_len, 0xEE);
@@ -597,7 +572,7 @@ TEST_F(azihsm_aes_xts, minimum_plaintext_size)
 TEST_F(azihsm_aes_xts, plaintext_too_small_fails)
 {
     part_list_.for_each_session([this](azihsm_handle session) {
-        KeyHandle key = generate_aes_xts_key(session);
+        KeyHandle key = generate_aes_xts_key(session, 512);
 
         const size_t plaintext_len = 8;  // Too small for XTS
         std::vector<uint8_t> plaintext(plaintext_len, 0xAA);
@@ -625,7 +600,7 @@ TEST_F(azihsm_aes_xts, plaintext_too_small_fails)
 TEST_F(azihsm_aes_xts, zero_dul_fails)
 {
     part_list_.for_each_session([this](azihsm_handle session) {
-        KeyHandle key = generate_aes_xts_key(session);
+        KeyHandle key = generate_aes_xts_key(session, 512);
 
         const size_t plaintext_len = 128;
         std::vector<uint8_t> plaintext(plaintext_len, 0xBB);
@@ -652,7 +627,7 @@ TEST_F(azihsm_aes_xts, zero_dul_fails)
 TEST_F(azihsm_aes_xts, streaming_non_dul_aligned_fails)
 {
     part_list_.for_each_session([this](azihsm_handle session) {
-        KeyHandle key = generate_aes_xts_key(session);
+        KeyHandle key = generate_aes_xts_key(session, 512);
 
         const size_t plaintext_len = 257;  // Not a multiple of DUL=128
         const size_t dul = 128;

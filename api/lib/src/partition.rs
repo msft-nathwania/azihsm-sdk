@@ -499,16 +499,7 @@ impl HsmPartition {
         credentials: &HsmCredentials,
         seed: Option<&[u8]>,
     ) -> HsmResult<HsmSession> {
-        let resiliency = self.resiliency_enabled();
-        let result = self.inner().read().open_session(api_rev, credentials, seed);
-
-        // Retry with restore when resiliency is enabled and the initial
-        // attempt returned a retryable error.
-        let result = if resiliency && is_open_session_retryable_error(&result) {
-            self.retry_open_session(result, api_rev, credentials, seed)?
-        } else {
-            result?
-        };
+        let result = ddi::open_session(self, api_rev, credentials, seed)?;
 
         Ok(HsmSession::new(
             result.sess_id,
@@ -518,64 +509,6 @@ impl HsmPartition {
             result.seed,
             result.bmk_session,
         ))
-    }
-
-    /// Retry loop for `open_session` with restore-partition recovery.
-    ///
-    /// Called when the initial `ddi::open_session` attempt failed with a
-    /// retryable error and resiliency is enabled.  On each iteration:
-    /// 1. Apply exponential backoff.
-    /// 2. Call `restore_partition` to re-establish credentials.
-    /// 3. Retry `ddi::open_session`.
-    fn retry_open_session(
-        &self,
-        initial_result: HsmResult<ddi::OpenSessionResult>,
-        api_rev: HsmApiRev,
-        credentials: &HsmCredentials,
-        seed: Option<&[u8]>,
-    ) -> HsmResult<ddi::OpenSessionResult> {
-        let mut result = initial_result;
-        let mut iter = 0u32;
-
-        while is_open_session_retryable_error(&result) && iter < MAX_RETRIES {
-            apply_backoff(iter, BACKOFF_BASE_MS, BACKOFF_JITTER_MS);
-
-            // Re-establish partition credentials before retrying open_session.
-            match self.restore_partition() {
-                Ok(()) => {
-                    result = self.inner().read().open_session(api_rev, credentials, seed);
-                }
-                Err(_) => {
-                    // Restore_partition failed during open_session retry.
-                }
-            }
-            iter += 1;
-        }
-
-        result
-    }
-
-    /// Retry loop for `cert_chain` with restore-partition recovery.
-    ///
-    /// Called when the initial `ddi::get_cert_chain` attempt failed with a
-    /// retryable error and resiliency is enabled.  On each iteration:
-    /// 1. Apply exponential backoff.
-    /// 2. Call `restore_partition` to re-establish credentials.
-    /// 3. Retry `ddi::get_cert_chain`.
-    fn retry_cert_chain(&self, initial_result: HsmResult<String>, slot: u8) -> HsmResult<String> {
-        let mut result = initial_result;
-        let mut iter = 0u32;
-
-        while is_cert_chain_retryable_error(&result) && iter < MAX_RETRIES {
-            apply_backoff(iter, BACKOFF_BASE_MS, BACKOFF_JITTER_MS);
-
-            // Cert chain is preserved across reset on hardware — no need
-            // to restore partition, just retry the DDI call after backoff.
-            result = self.inner().read().cert_chain(slot);
-            iter += 1;
-        }
-
-        result
     }
 
     /// Restores partition state after a resiliency event.
@@ -790,14 +723,7 @@ impl HsmPartition {
     ///
     /// Returns the certificate chain as a PEM string.
     pub fn cert_chain(&self, slot: u8) -> HsmResult<String> {
-        let resiliency = self.resiliency_enabled();
-        let result = self.inner().read().cert_chain(slot);
-
-        if resiliency && is_cert_chain_retryable_error(&result) {
-            self.retry_cert_chain(result, slot)
-        } else {
-            result
-        }
+        ddi::get_cert_chain(self, slot)
     }
 
     /// Retrieves the public key of the partition identity (PID) certificate.
@@ -1081,7 +1007,7 @@ impl HsmPartitionInner {
     }
 
     /// Returns the API revision in use by this partition.
-    fn api_rev(&self) -> HsmApiRev {
+    pub(crate) fn api_rev(&self) -> HsmApiRev {
         self.api_rev
     }
 
@@ -1148,16 +1074,6 @@ impl HsmPartitionInner {
         Ok(())
     }
 
-    /// Opens a new session on the partition.
-    pub(crate) fn open_session(
-        &self,
-        api_rev: HsmApiRev,
-        credentials: &HsmCredentials,
-        seed: Option<&[u8]>,
-    ) -> HsmResult<ddi::OpenSessionResult> {
-        ddi::open_session(&self.dev, api_rev, credentials, seed)
-    }
-
     /// Reopens a session on the partition.
     pub(crate) fn reopen_session(
         &self,
@@ -1168,11 +1084,6 @@ impl HsmPartitionInner {
         bmk_session: &[u8],
     ) -> HsmResult<ddi::ReopenSessionResult> {
         ddi::reopen_session(&self.dev, api_rev, sess_id, credentials, seed, bmk_session)
-    }
-
-    /// Retrieves the certificate chain from the partition.
-    pub(crate) fn cert_chain(&self, slot: u8) -> HsmResult<String> {
-        ddi::get_cert_chain(&self.dev, self.api_rev, slot)
     }
 
     /// Retrieves the public key of the partition identity (PID) certificate.

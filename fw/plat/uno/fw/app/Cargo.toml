@@ -1,0 +1,62 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+[package]
+edition = "2024"
+name = "azihsm_fw_uno_app"
+version = "0.1.0"
+
+[[bin]]
+bench = false
+doctest = false
+name = "azihsm_fw_uno_app"
+test = false
+
+[dependencies]
+azihsm_fw_hsm_core = { workspace = true }
+azihsm_fw_hsm_core_tracing = { workspace = true }
+azihsm_fw_hsm_pal_traits = { workspace = true }
+azihsm_fw_uno_drivers_profile = { workspace = true }
+azihsm_fw_uno_drivers_semihosting = { optional = true, workspace = true }
+azihsm_fw_uno_drivers_systick = { workspace = true }
+azihsm_fw_uno_pac = { workspace = true }
+azihsm_fw_uno_pal = { workspace = true }
+azihsm_fw_uno_trace = { workspace = true }
+cortex-m = { features = ["critical-section-single-core"], workspace = true }
+cortex-m-rt = { features = ["device"], workspace = true }
+embassy-executor = { features = [
+  "executor-thread",
+  "platform-cortex-m",
+  "trace",
+], workspace = true }
+embassy-futures = { workspace = true }
+embassy-sync = { workspace = true }
+embassy-time = { workspace = true }
+
+[features]
+default = ["trace-uart"]
+
+# Enable ARM semihosting integration for the emulator:
+#   - The PAL emits `SYS_READY` when the boot handshake completes, so the
+#     emulator host loop (which snoops the semihosting trap) learns the
+#     firmware is ready to accept IO.
+#   - The panic handler reports the panic via `SYS_WRITE0` and exits with
+#     `SYS_EXIT(-1)` so the emulator stops on firmware panic.
+# Disable on targets (e.g. production silicon) that cannot snoop semihosting.
+semihosting = [
+  "azihsm_fw_uno_pal/semihosting",
+  "dep:azihsm_fw_uno_drivers_semihosting",
+]
+
+# Trace output backend (mutually exclusive). Selecting one compiles the
+# trace emitter at INFO level and routes output to that backend. With
+# neither enabled, trace output is disabled.
+trace-semihosting = [
+  "azihsm_fw_uno_trace/backend-semihosting",
+  "azihsm_fw_uno_trace/level-info",
+  "azihsm_fw_uno_trace/tracing",
+]
+trace-uart = [
+  "azihsm_fw_uno_trace/backend-uart",
+  "azihsm_fw_uno_trace/level-info",
+  "azihsm_fw_uno_trace/tracing",
+]

@@ -350,6 +350,10 @@ pub enum HsmError {
     /// carries the requested selector (SVN / owner id).
     SeedNotFound = 0x08700100,
 
+    /// A cryptographic algorithm self-test (CAST) produced output that
+    /// did not match its known-answer vector.
+    SelfTestKatMismatch = 0x08700101,
+
     /// The SQE's out-of-band descriptor-array length (`oob_len`) is
     /// malformed: not a whole number of 16-byte SGL descriptors, or
     /// larger than a single descriptor page.
@@ -366,9 +370,11 @@ pub enum HsmError {
     // returned over the wire).
     /// A Rust `panic!` reached the firmware panic handler.
     Panic = 0x08F00001,
+
     /// A CPU `HardFault` exception was taken (an escalated bus/usage/mem
     /// fault, or a stack overflow).
     HardFault = 0x08F00002,
+
     /// An exception or interrupt with no dedicated handler reached the
     /// `DefaultHandler`.
     UnexpectedException = 0x08F00003,

@@ -58,7 +58,12 @@ addrmap hsm_dtcm {
     default hw = na;
     default sw = rw;
 
-    // Per-IO NonDma scratch (33 × 2 KB = 66 KB; slots 0..31 host, 32 admin)
+    // Per-IO NonDma scratch (33 × 2 KB = 66 KB; slots 0..31 host, 32 admin).
+    // Stays 33 (not 34): the self-test slot (SRAM index 33) uses DMA buffers
+    // only — all crypto drivers allocate from the SRAM (Dma) heap and never the
+    // DTCM (NonDma) heap — so it needs no DTCM scratch. DTCM is also full here:
+    // DTCM_IO_BUF[33] ends exactly at CRASHDUMP_BASE (0x3F400), leaving no room
+    // to grow.
     dtcm_io_buf_t    DTCM_IO_BUF[33]   @ 0x2EC00 += 0x800;
 
     // Crashdump + heartbeat

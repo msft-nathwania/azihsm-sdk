@@ -45,6 +45,7 @@ mod lock;
 mod pal;
 mod part;
 mod seed;
+mod self_test;
 mod session;
 mod vault;
 

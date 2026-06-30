@@ -422,6 +422,10 @@ pub enum HsmError {
     /// spoofing this error.
     SdBackupSvnRollback = 0x08700109,
 
+    /// A cryptographic algorithm self-test (CAST) produced output that
+    /// did not match its known-answer vector.
+    SelfTestKatMismatch = 0x0870010A,
+
     // Firmware-internal diagnostic codes logged by the CPU fault and panic
     // exception handlers (`azihsm_fw_uno_fault`). These are not DDI protocol
     // statuses: they use the PAL diagnostic facility (`0x08F`) to stay clear of

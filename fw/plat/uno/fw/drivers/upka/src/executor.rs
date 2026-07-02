@@ -1,9 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use core::sync::atomic::compiler_fence;
-use core::sync::atomic::Ordering;
-
 use azihsm_fw_static_ref::StaticRef;
 use azihsm_fw_uno_reg_soc::io_gsram::regs::IoGsramRegs;
 use azihsm_fw_uno_reg_soc::io_gsram::IO_GSRAM_BASE;
@@ -53,7 +50,15 @@ impl EngineExecutor {
         arg3: u32,
     ) {
         Self::write_descriptor(engine_id, opcode, result, arg1, arg2, arg3);
-        compiler_fence(Ordering::SeqCst);
+        // Order the descriptor writes (Normal GSRAM memory) before the doorbell
+        // write (Device memory). On Cortex-M7 a Device write does NOT order
+        // prior Normal-memory writes, so without this barrier the engine can
+        // fetch a partially-written descriptor and fault on the stale arg
+        // addresses (ERROR_BUS) — observed as a deterministic per-engine
+        // failure. A `compiler_fence` only constrains the compiler, not the
+        // hardware store buffer. Matches the reference firmware's `dmb()` before
+        // the doorbell and the other uno drivers (aes/sha/iic/oic/gdma/ipc).
+        cortex_m::asm::dmb();
         Self::submit_cmd(engine_id);
     }
 

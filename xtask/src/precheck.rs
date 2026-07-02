@@ -106,6 +106,12 @@ pub struct Precheck {
     /// Additional paths to object files to append to LLVM_COV_FLAGS (used with --coverage-report)
     #[clap(long)]
     pub additional_obj_paths: Vec<String>,
+    /// The nextest test target to run
+    #[clap(long)]
+    pub test: Option<String>,
+    /// Test name filters
+    #[clap(long)]
+    filter: Vec<String>,
 }
 
 impl Xtask for Precheck {
@@ -180,7 +186,12 @@ impl Xtask for Precheck {
         }
 
         if stage.nextest || stage.all {
-            if self.package.is_none() && self.features.is_none() {
+            if self.package.is_none()
+                && self.features.is_none()
+                && self.filterset.is_none()
+                && self.test.is_none()
+                && self.filter.is_empty()
+            {
                 // Run default tests
                 let tests = default_tests(&self.exclude, self.profile.clone());
                 run_tests(tests, false, self.skip_clean, ctx.clone())?;
@@ -199,6 +210,8 @@ impl Xtask for Precheck {
                     filterset: self.filterset.clone(),
                     profile: self.profile.clone(),
                     exclude: self.exclude.clone(),
+                    test: self.test.clone(),
+                    filter: self.filter.clone(),
                 }
                 .run(ctx.clone())?;
             }
@@ -206,7 +219,12 @@ impl Xtask for Precheck {
 
         // Run code coverage
         if stage.coverage || stage.all {
-            if self.package.is_none() && self.features.is_none() {
+            if self.package.is_none()
+                && self.features.is_none()
+                && self.filterset.is_none()
+                && self.test.is_none()
+                && self.filter.is_empty()
+            {
                 // Run default tests with coverage
                 let tests = default_tests(&self.exclude, self.profile.clone());
                 run_tests(tests, true, self.skip_clean, ctx.clone())?;
@@ -218,6 +236,8 @@ impl Xtask for Precheck {
                     filterset: self.filterset.clone(),
                     profile: self.profile.clone(),
                     exclude: self.exclude.clone(),
+                    test: self.test.clone(),
+                    filter: self.filter.clone(),
                     skip_clean: self.skip_clean,
                 }
                 .run(ctx.clone())?;
@@ -262,6 +282,8 @@ fn default_tests(exclude: &[String], profile: Option<String>) -> Vec<Nextest> {
         filterset: None,
         profile: profile.clone().or(Some("ci-mock".to_string())),
         exclude: mock_exclude,
+        test: None,
+        filter: vec![],
     });
 
     // SDK Run resiliency fault-injection tests (requires res-test
@@ -274,6 +296,22 @@ fn default_tests(exclude: &[String], profile: Option<String>) -> Vec<Nextest> {
             filterset: Some("test(resiliency::fault_injection::)".to_string()),
             profile: profile.clone().or(Some("ci-mock-res".to_string())),
             exclude: exclude.to_owned(),
+            test: None,
+            filter: vec![],
+        });
+    }
+
+    // Run emu smoke tests
+    if !exclude.iter().any(|e| e == "azihsm_ddi_mbor_types") {
+        tests.push(Nextest {
+            features: Some("emu".to_string()),
+            package: Some("azihsm_ddi_mbor_types".to_string()),
+            no_default_features: false,
+            filterset: None,
+            profile: profile.clone().or(Some("ci-emu-smoke".to_string())),
+            exclude: exclude.to_owned(),
+            test: Some("azihsm_ddi_tests".to_string()),
+            filter: vec!["smoke".to_string()],
         });
     }
 
@@ -294,6 +332,8 @@ fn ddi_tests(exclude: &[String], profile: Option<String>) -> Vec<Nextest> {
             filterset: None,
             profile: profile.clone().or(Some("ci-mock-table-4".to_string())),
             exclude: exclude.to_owned(),
+            test: None,
+            filter: vec![],
         });
 
         // SDK Run azihsm_ddi_mbor_types mock tests table-64
@@ -304,6 +344,8 @@ fn ddi_tests(exclude: &[String], profile: Option<String>) -> Vec<Nextest> {
             filterset: None,
             profile: profile.clone().or(Some("ci-mock-table-64".to_string())),
             exclude: exclude.to_owned(),
+            test: None,
+            filter: vec![],
         });
     }
 
@@ -317,6 +359,8 @@ fn ddi_tests(exclude: &[String], profile: Option<String>) -> Vec<Nextest> {
             filterset: None,
             profile: profile.clone().or(Some("ci-tbor-emu".to_string())),
             exclude: exclude.to_owned(),
+            test: None,
+            filter: vec![],
         });
     }
 

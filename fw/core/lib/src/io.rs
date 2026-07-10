@@ -163,7 +163,7 @@ impl<P: HsmPal> Hsm<P> {
             )?;
 
         // ── Phase 2: decode + validate + dispatch (no yield) ───────
-        let (resp, session_ctrl) = {
+        let (resp, session_ctrl, cqe_sess_id, cqe_closed) = {
             let req = &mut req_buf[..params.src_len];
             let mut decoder = DdiDecoder::new(req);
             let hdr: DdiReqHdr = decoder.decode_hdr().op_err(
@@ -184,14 +184,29 @@ impl<P: HsmPal> Hsm<P> {
                 Err(e) => Err(e),
             };
 
-            let resp: &DmaBuf = dispatch_result.or_else(|status| {
+            // Fill the CQE session fields so the host can track the session
+            // per file handle: a successful OpenSession carries the newly
+            // allocated id in `session_id` (which sets `session_id_valid`), and
+            // a successful CloseSession additionally sets `session_closed`.
+            // Both are left cleared on any dispatch failure so the fields are
+            // only populated on success.
+            let (cqe_sess_id, cqe_closed) = match &dispatch_result {
+                Ok(out) => match session_ctrl {
+                    SessionCtrl::Open => (out.session_id, false),
+                    SessionCtrl::Close => (hdr.sess_id, true),
+                    _ => (None, false),
+                },
+                Err(_) => (None, false),
+            };
+
+            let resp: &DmaBuf = dispatch_result.map(|out| out.resp).or_else(|status| {
                 self.pal()
                     .dma_alloc_var(io, |buf| ddi::mbor::encode_ddi_err(hdr.op, status, buf))
                     .op_status(HostStatus::INTERNAL_ERROR)
                     .map(|b| &*b)
             })?;
 
-            (resp, session_ctrl)
+            (resp, session_ctrl, cqe_sess_id, cqe_closed)
         };
 
         let resp_len = resp.len();
@@ -206,7 +221,13 @@ impl<P: HsmPal> Hsm<P> {
                 HostStatus::DMA_TXN_ERROR,
             )?;
 
-        Ok(HsmOpStatus::new(resp_len, session_ctrl, None, None, false))
+        Ok(HsmOpStatus::new(
+            resp_len,
+            session_ctrl,
+            cqe_sess_id,
+            None,
+            cqe_closed,
+        ))
     }
 
     /// Handles an [`OP_TBOR`] IO command.

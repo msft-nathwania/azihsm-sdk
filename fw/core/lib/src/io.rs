@@ -45,6 +45,7 @@
 use azihsm_fw_ddi_mbor_api::DdiDecoder;
 use azihsm_fw_ddi_mbor_types::DdiReqHdr;
 use azihsm_fw_ddi_tbor::RequestView as TborRequestView;
+use azihsm_fw_hsm_oob::OobPtr;
 
 use super::*;
 
@@ -95,7 +96,12 @@ impl<P: HsmPal> Hsm<P> {
     #[inline]
     fn partition_enabled(&self, io: &P::Io) -> bool {
         crate::part_state::part_state(self.pal(), io)
-            .map(|s| matches!(s, PartState::Enabled | PartState::Initializing))
+            .map(|s| {
+                matches!(
+                    s,
+                    PartState::Enabled | PartState::Initializing | PartState::Initialized
+                )
+            })
             .unwrap_or(false)
     }
 
@@ -275,6 +281,7 @@ impl<P: HsmPal> Hsm<P> {
                     &mut req_buf[..params.src_len],
                     opcode,
                     params.sqe_session_id,
+                    params.oob,
                 )
                 .await;
                 let resp: &DmaBuf = dispatch_result.or_else(|err| {
@@ -308,12 +315,33 @@ impl<P: HsmPal> Hsm<P> {
     fn decode_io_sqe(io: &P::Io) -> Result<IoSqeParams, OpError> {
         let sqe = Sqe::from(io.sqe());
         sqe.validate_io_op()?;
+        // Out-of-band SGL descriptor array (side-band bulk transfers such
+        // as PartFinal's PTA cert chain); `None` when the SQE carries no
+        // OOB region.  A non-zero `oob_len` with a null `oob_prp` is
+        // rejected up front: `validate_io_op` only bounds the OOB length,
+        // so without this a later OOB read would DMA from a null address.
+        let oob_len = sqe.oob_len();
+        let oob_prp = sqe.oob_prp();
+        let oob = match (oob_len != 0, oob_prp.is_null()) {
+            (false, _) => None,
+            (true, false) => Some(OobPtr {
+                prp: oob_prp,
+                len: oob_len,
+            }),
+            (true, true) => {
+                return Err(OpError::new(
+                    HsmError::InvalidArg,
+                    HostStatus::INVALID_FIELD_IN_COMMAND,
+                ));
+            }
+        };
         Ok(IoSqeParams {
             src_len: sqe.src_len() as usize,
             src_addr: sqe.src_prp1(),
             dst_addr: sqe.dst_prp1(),
             session_flags: sqe.session_flags(),
             sqe_session_id: sqe.session_id(),
+            oob,
         })
     }
 
@@ -393,4 +421,8 @@ struct IoSqeParams {
     dst_addr: HsmDmaAddr,
     session_flags: SessionFlags,
     sqe_session_id: u16,
+    /// Optional out-of-band SGL descriptor array (`oob_prp`/`oob_len`);
+    /// `None` when `oob_len == 0`.  Threaded to TBOR handlers that pull
+    /// bulk side-band data (e.g. PartFinal's PTA cert chain).
+    oob: Option<OobPtr>,
 }

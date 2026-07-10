@@ -605,7 +605,7 @@ async fn commit_partition_state<P: HsmPal>(
         .vault_key_create(
             io,
             inputs.root,
-            HsmVaultKeyKind::PartitionUniqueMachineSecret,
+            HsmVaultKeyKind::UniquePartitionSecret,
             None,
             PART_ROOT_VAULT_ATTRS,
         )

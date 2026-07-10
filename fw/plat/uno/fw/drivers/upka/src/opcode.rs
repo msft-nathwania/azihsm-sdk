@@ -25,6 +25,24 @@ pub(crate) const ECC_KEY_GEN_521: u32 = 0x1006_0008;
 pub(crate) const MONT_CONST_CALC_256: u32 = 0x500c_0000;
 pub(crate) const MONT_CONST_CALC_384: u32 = 0x500c_0001;
 pub(crate) const MONT_CONST_CALC_521: u32 = 0x500c_0008;
+pub(crate) const MOD_MULTIPLICATION_256: u32 = 0x5004_0000;
+pub(crate) const MOD_MULTIPLICATION_384: u32 = 0x5004_0001;
+pub(crate) const MOD_MULTIPLICATION_521: u32 = 0x5004_0008;
+pub(crate) const MOD_ADDITION_256: u32 = 0x5005_0000;
+pub(crate) const MOD_ADDITION_384: u32 = 0x5005_0001;
+pub(crate) const MOD_ADDITION_521: u32 = 0x5005_0008;
+pub(crate) const MOD_INVERSE_256: u32 = 0x5007_0000;
+pub(crate) const MOD_INVERSE_384: u32 = 0x5007_0001;
+pub(crate) const MOD_INVERSE_521: u32 = 0x5007_0008;
+pub(crate) const MOD_REDUCTION_256: u32 = 0x5009_0000;
+pub(crate) const MOD_REDUCTION_384: u32 = 0x5009_0001;
+pub(crate) const MOD_REDUCTION_521: u32 = 0x5009_0008;
+pub(crate) const MONT_REPR_OUT_256: u32 = 0x500a_0000;
+pub(crate) const MONT_REPR_OUT_384: u32 = 0x500a_0001;
+pub(crate) const MONT_REPR_OUT_521: u32 = 0x500a_0008;
+pub(crate) const MONT_REPR_IN_256: u32 = 0x500b_0000;
+pub(crate) const MONT_REPR_IN_384: u32 = 0x500b_0001;
+pub(crate) const MONT_REPR_IN_521: u32 = 0x500b_0008;
 pub(crate) const RSA_PRIV_2K: u32 = 0x5000_0003;
 pub(crate) const RSA_PRIV_3K: u32 = 0x5000_0004;
 pub(crate) const RSA_PRIV_4K: u32 = 0x5000_0005;
@@ -151,6 +169,76 @@ pub(crate) fn ecc_point_mul_opcode(curve: UpkaEccCurve) -> u32 {
     }
 }
 
+/// Return the modular-multiplication opcode for the selected curve.
+///
+/// Multiplies two Montgomery-form field elements modulo the active modulus that
+/// was established by the preceding `mont_const_calc`.
+pub(crate) fn ecc_mod_mul_opcode(curve: UpkaEccCurve) -> u32 {
+    match curve {
+        UpkaEccCurve::P256 => MOD_MULTIPLICATION_256,
+        UpkaEccCurve::P384 => MOD_MULTIPLICATION_384,
+        UpkaEccCurve::P521 => MOD_MULTIPLICATION_521,
+    }
+}
+
+/// Return the modular-addition opcode for the selected curve.
+///
+/// Adds two Montgomery-form field elements modulo the active modulus.
+pub(crate) fn ecc_mod_add_opcode(curve: UpkaEccCurve) -> u32 {
+    match curve {
+        UpkaEccCurve::P256 => MOD_ADDITION_256,
+        UpkaEccCurve::P384 => MOD_ADDITION_384,
+        UpkaEccCurve::P521 => MOD_ADDITION_521,
+    }
+}
+
+/// Return the modular-inverse opcode for the selected curve.
+///
+/// Computes the multiplicative inverse of a Montgomery-form field element modulo
+/// the active modulus.
+pub(crate) fn ecc_mod_inverse_opcode(curve: UpkaEccCurve) -> u32 {
+    match curve {
+        UpkaEccCurve::P256 => MOD_INVERSE_256,
+        UpkaEccCurve::P384 => MOD_INVERSE_384,
+        UpkaEccCurve::P521 => MOD_INVERSE_521,
+    }
+}
+
+/// Return the modular-reduction opcode for the selected curve.
+///
+/// Reduces a natural-form field element modulo the active modulus.
+pub(crate) fn ecc_mod_reduction_opcode(curve: UpkaEccCurve) -> u32 {
+    match curve {
+        UpkaEccCurve::P256 => MOD_REDUCTION_256,
+        UpkaEccCurve::P384 => MOD_REDUCTION_384,
+        UpkaEccCurve::P521 => MOD_REDUCTION_521,
+    }
+}
+
+/// Return the Montgomery-representation-in opcode for the selected curve.
+///
+/// Converts a natural-form field element into Montgomery form for the active
+/// modulus (`point_size` bytes in, `montgomery_size` bytes out).
+pub(crate) fn ecc_mont_repr_in_opcode(curve: UpkaEccCurve) -> u32 {
+    match curve {
+        UpkaEccCurve::P256 => MONT_REPR_IN_256,
+        UpkaEccCurve::P384 => MONT_REPR_IN_384,
+        UpkaEccCurve::P521 => MONT_REPR_IN_521,
+    }
+}
+
+/// Return the Montgomery-representation-out opcode for the selected curve.
+///
+/// Converts a Montgomery-form field element back into natural form for the
+/// active modulus (`montgomery_size` bytes in, `point_size` bytes out).
+pub(crate) fn ecc_mont_repr_out_opcode(curve: UpkaEccCurve) -> u32 {
+    match curve {
+        UpkaEccCurve::P256 => MONT_REPR_OUT_256,
+        UpkaEccCurve::P384 => MONT_REPR_OUT_384,
+        UpkaEccCurve::P521 => MONT_REPR_OUT_521,
+    }
+}
+
 /// Return the ECC point-validation opcode for the selected curve.
 ///
 /// # Parameters
@@ -199,6 +287,29 @@ pub(crate) fn point_size(curve: UpkaEccCurve) -> usize {
         UpkaEccCurve::P256 => 32,
         UpkaEccCurve::P384 => 48,
         UpkaEccCurve::P521 => 66,
+    }
+}
+
+/// Return the Montgomery-form field-element size for the selected ECC curve.
+///
+/// Montgomery intermediates carry extra guard words versus the natural
+/// `point_size` representation.
+///
+/// # Parameters
+///
+/// - `curve`: ECC curve selector.
+///
+/// # Returns
+///
+/// - Montgomery representation size in bytes.
+///   - P256: 36
+///   - P384: 52
+///   - P521: 72
+pub(crate) fn montgomery_size(curve: UpkaEccCurve) -> usize {
+    match curve {
+        UpkaEccCurve::P256 => 36,
+        UpkaEccCurve::P384 => 52,
+        UpkaEccCurve::P521 => 72,
     }
 }
 

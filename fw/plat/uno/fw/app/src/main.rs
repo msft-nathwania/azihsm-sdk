@@ -124,6 +124,22 @@ async fn handle_io(io: UnoHsmIo) {
     HSM.get().await.handle_io(io).await;
 }
 
+/// Periodic runtime cryptographic self-test loop — runs forever as a
+/// single Embassy task.
+///
+/// Re-runs the HSM-executed CAST suite one test per period, round-robin
+/// (see [`UnoHsmPal::run_self_test_periodic`]). Spawned once boot completes,
+/// alongside [`poll_io`], so it runs concurrently with the IPC heartbeat and
+/// the NVIC polling loop.
+///
+/// # Returns
+/// Never returns (`!`). On a self-test failure the PAL fail-stops, starving
+/// the executor so the SP resets the module.
+#[embassy_executor::task]
+async fn periodic_self_test() -> ! {
+    HSM.get().await.pal().run_self_test_periodic().await
+}
+
 /// IPC message/event receive loop — runs forever as a single
 /// Embassy task. PAL handles boot handshake internally;
 /// app spawns [`poll_io`] once boot completes.
@@ -148,6 +164,9 @@ async fn poll_ipc(spawner: Spawner) -> ! {
             booted = true;
             info!("app", "boot complete, spawning poll_io");
             if let Ok(token) = poll_io(spawner) {
+                spawner.spawn(token);
+            }
+            if let Ok(token) = periodic_self_test() {
                 spawner.spawn(token);
             }
         }

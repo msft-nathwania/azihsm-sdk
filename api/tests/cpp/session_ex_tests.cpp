@@ -57,8 +57,13 @@ class azihsm_sess_ex : public ::testing::Test
     static azihsm_handle open_sd_session(azihsm_handle part_handle)
     {
         azihsm_handle sess_handle = 0;
-        auto err =
-            azihsm_sess_ex_open(part_handle, AZIHSM_SESSION_EX_TYPE_AUTHENTICATED, &sess_handle);
+        azihsm_session_psk psk{ 0, nullptr };
+        auto err = azihsm_sess_ex_open(
+            part_handle,
+            &psk,
+            AZIHSM_SESSION_EX_TYPE_AUTHENTICATED,
+            &sess_handle
+        );
         if (err != AZIHSM_STATUS_SUCCESS || sess_handle == 0)
         {
             ADD_FAILURE() << "azihsm_sess_ex_open failed: " << err;
@@ -85,8 +90,13 @@ TEST_F(azihsm_sess_ex, open_and_close)
             scope_guard::make_scope_exit([&part_handle] { azihsm_part_close(part_handle); });
 
         azihsm_handle sess_handle = 0;
-        auto err =
-            azihsm_sess_ex_open(part_handle, AZIHSM_SESSION_EX_TYPE_AUTHENTICATED, &sess_handle);
+        azihsm_session_psk psk{ 0, nullptr };
+        auto err = azihsm_sess_ex_open(
+            part_handle,
+            &psk,
+            AZIHSM_SESSION_EX_TYPE_AUTHENTICATED,
+            &sess_handle
+        );
 
         ASSERT_EQ(err, AZIHSM_STATUS_SUCCESS);
         ASSERT_NE(sess_handle, 0);
@@ -109,7 +119,9 @@ TEST_F(azihsm_sess_ex, open_null_sess_handle)
         auto part_guard =
             scope_guard::make_scope_exit([&part_handle] { azihsm_part_close(part_handle); });
 
-        auto err = azihsm_sess_ex_open(part_handle, AZIHSM_SESSION_EX_TYPE_AUTHENTICATED, nullptr);
+        azihsm_session_psk psk{ 0, nullptr };
+        auto err =
+            azihsm_sess_ex_open(part_handle, &psk, AZIHSM_SESSION_EX_TYPE_AUTHENTICATED, nullptr);
 
         ASSERT_EQ(err, AZIHSM_STATUS_INVALID_ARGUMENT);
     });
@@ -122,10 +134,92 @@ TEST_F(azihsm_sess_ex, open_invalid_partition_handle)
 
         azihsm_handle sess_handle = 0;
 
-        auto err =
-            azihsm_sess_ex_open(bad_handle, AZIHSM_SESSION_EX_TYPE_AUTHENTICATED, &sess_handle);
+        azihsm_session_psk psk{ 0, nullptr };
+        auto err = azihsm_sess_ex_open(
+            bad_handle,
+            &psk,
+            AZIHSM_SESSION_EX_TYPE_AUTHENTICATED,
+            &sess_handle
+        );
 
         ASSERT_EQ(err, AZIHSM_STATUS_INVALID_HANDLE);
+    });
+}
+
+// A NULL `psk` credential pointer is rejected before any device round-trip.
+TEST_F(azihsm_sess_ex, open_null_psk)
+{
+    part_list_.for_each_part([](std::vector<azihsm_char> &path) {
+        azihsm_handle part_handle = open_reset_partition(path);
+        if (part_handle == 0)
+        {
+            return;
+        }
+        auto part_guard =
+            scope_guard::make_scope_exit([&part_handle] { azihsm_part_close(part_handle); });
+
+        azihsm_handle sess_handle = 0;
+        auto err = azihsm_sess_ex_open(
+            part_handle,
+            nullptr,
+            AZIHSM_SESSION_EX_TYPE_AUTHENTICATED,
+            &sess_handle
+        );
+
+        ASSERT_EQ(err, AZIHSM_STATUS_INVALID_ARGUMENT);
+    });
+}
+
+// An unknown `psk_id` (neither CO = 0 nor CU = 1) is rejected.
+TEST_F(azihsm_sess_ex, open_invalid_psk_id)
+{
+    part_list_.for_each_part([](std::vector<azihsm_char> &path) {
+        azihsm_handle part_handle = open_reset_partition(path);
+        if (part_handle == 0)
+        {
+            return;
+        }
+        auto part_guard =
+            scope_guard::make_scope_exit([&part_handle] { azihsm_part_close(part_handle); });
+
+        azihsm_handle sess_handle = 0;
+        azihsm_session_psk psk{ 2, nullptr }; // 2 is neither CO nor CU
+        auto err = azihsm_sess_ex_open(
+            part_handle,
+            &psk,
+            AZIHSM_SESSION_EX_TYPE_AUTHENTICATED,
+            &sess_handle
+        );
+
+        ASSERT_EQ(err, AZIHSM_STATUS_INVALID_ARGUMENT);
+    });
+}
+
+// A caller-supplied PSK buffer of the wrong length (not `PSK_LEN`) is rejected.
+TEST_F(azihsm_sess_ex, open_wrong_length_psk)
+{
+    part_list_.for_each_part([](std::vector<azihsm_char> &path) {
+        azihsm_handle part_handle = open_reset_partition(path);
+        if (part_handle == 0)
+        {
+            return;
+        }
+        auto part_guard =
+            scope_guard::make_scope_exit([&part_handle] { azihsm_part_close(part_handle); });
+
+        azihsm_handle sess_handle = 0;
+        // 16 bytes: a valid buffer but the wrong length (PSK is 32 bytes).
+        std::vector<uint8_t> short_psk(16, 0);
+        azihsm_buffer psk_buf{ short_psk.data(), static_cast<uint32_t>(short_psk.size()) };
+        azihsm_session_psk psk{ 0, &psk_buf };
+        auto err = azihsm_sess_ex_open(
+            part_handle,
+            &psk,
+            AZIHSM_SESSION_EX_TYPE_AUTHENTICATED,
+            &sess_handle
+        );
+
+        ASSERT_EQ(err, AZIHSM_STATUS_INVALID_ARGUMENT);
     });
 }
 

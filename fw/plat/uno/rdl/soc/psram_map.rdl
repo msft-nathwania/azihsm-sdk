@@ -1,0 +1,49 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+//
+// PSRAM address map (psram).
+//
+// Persistent SRAM at base 0xA3E0_0000 (32 KB). Survives a warm reset and
+// is shared across the SP, CP, and FP. The reference firmware models the
+// full region here (Admin/HSM/FP IPC queues, CDMA IO SQE/CQE, producer/
+// consumer indices, FP boot status). The async-refactor CP does not use
+// the FP IPC queues yet, so uno models ONLY the reset-reason word that the
+// boot processor (SP) publishes before releasing the CP cores.
+//
+//   0x0000_3AFC  RESET_TYPE (4 B)  reset-reason word (SP-written, CP-read)
+//
+// RESET_TYPE gates destructive boot init (recovery boot): the HSM reads it
+// at boot and skips the partition-store wipe on a warm / fw-update reset.
+// Mirrors the reference PsRamMemMap::reset_type at the identical absolute
+// address 0xA3E0_3AFC.
+
+
+// ══════════════════════════════════════════════════════════════
+// Reset reason
+// ══════════════════════════════════════════════════════════════
+
+reg reset_type_t {
+    name = "Reset Reason Type";
+    desc = "SoC reset reason published by the boot processor (SP) before
+            releasing the CP cores. 0 = POR, 1 = warm reset, 2 = fw-update
+            warm reset. Read-only from the CP; the HSM reads it at boot to
+            gate destructive partition-store init (recovery boot).";
+    field { sw = r; hw = na; } RESET_TYPE[31:0] = 0x0;
+};
+
+
+// ══════════════════════════════════════════════════════════════
+// Address Map
+// ══════════════════════════════════════════════════════════════
+
+addrmap psram {
+    name = "PSRAM";
+    desc = "Persistent SRAM (32 KB at 0xA3E0_0000). Survives warm reset;
+             shared SP/CP/FP region. uno models only the reset-reason word.";
+
+    default hw = na;
+    default sw = rw;
+
+    // Reset-reason word — SP publishes it before CP boot (fixed 0xA3E0_3AFC).
+    reset_type_t RESET_TYPE @ 0x3AFC;
+};

@@ -80,6 +80,17 @@ pub trait SqeValidateExt {
     ///
     /// Call [`validate`](Self::validate) first for common checks.
     fn validate_io_op(&self) -> Result<(), OpError>;
+
+    /// Validate the SQE fields specific to the FLUSH opcode.
+    ///
+    /// Flush names its target session entirely through the SQE session
+    /// fields (there is no request body), so the session-control shape
+    /// must be exactly:
+    /// - `ctrl == `[`SessionCtrl::Close`]
+    /// - `id_valid == true`
+    ///
+    /// Call [`validate`](Self::validate) first for common checks.
+    fn validate_flush_op(&self) -> Result<(), OpError>;
 }
 
 impl SqeValidateExt for Sqe<'_> {
@@ -187,6 +198,34 @@ impl SqeValidateExt for Sqe<'_> {
             }
         }
 
+        Ok(())
+    }
+
+    fn validate_flush_op(&self) -> Result<(), OpError> {
+        let flags = self.session_flags();
+        if flags.ctrl() != SessionCtrl::Close as u8 {
+            error!(
+                "core",
+                HsmError::InvalidSessionControlOpcode,
+                "flush: session ctrl {} != Close",
+                flags.ctrl()
+            );
+            return Err(OpError::new(
+                HsmError::InvalidSessionControlOpcode,
+                HostStatus::INVALID_FIELD_IN_COMMAND,
+            ));
+        }
+        if !flags.id_valid() {
+            error!(
+                "core",
+                HsmError::SessionExpected,
+                "flush: session id not valid"
+            );
+            return Err(OpError::new(
+                HsmError::SessionExpected,
+                HostStatus::INVALID_FIELD_IN_COMMAND,
+            ));
+        }
         Ok(())
     }
 }

@@ -577,11 +577,47 @@ impl<P: HsmPal> Hsm<P> {
 
     /// Handles an [`OP_FLUSH`] IO command.
     ///
-    /// Returns [`HsmError::IoChannelUnknownOp`] — flush is not yet supported.
-    async fn handle_flush_op(&self, _io: &mut P::Io) -> Result<HsmOpStatus, OpError> {
-        Err(OpError::new(
-            HsmError::IoChannelUnknownOp,
-            HostStatus::INVALID_COMMAND_OPCODE,
+    /// Flush is the driver-issued session teardown that runs when a host
+    /// file descriptor closes.  It carries no request body: the target
+    /// session is named entirely by the SQE session fields (`ctrl ==
+    /// Close`, `id_valid`, `session_id`).
+    ///
+    /// Teardown is delegated to `session_destroy`, the same PAL entry point
+    /// a host `CloseSession` (DDI 1105) uses: it clears the session's
+    /// fast-path bulk keys, drops its vault entries, and frees the slot.
+    /// For an application session that owns AES bulk keys this issues a
+    /// `DeleteEphemeral` round-trip to the FP engine and awaits it to
+    /// completion; for a manager session (which owns none) the FP step is a
+    /// no-op.  A single run-to-completion call therefore unifies the
+    /// reference firmware's split flush paths — a synchronous
+    /// `session_table().delete()` for manager sessions and an asynchronous
+    /// `begin`/`end_close_user_session` FP round-trip for app sessions.
+    ///
+    /// Because flush is best-effort fd-close cleanup it is idempotent: an
+    /// already-free session slot still completes with success (parity with
+    /// the reference `session_table().delete()`, which is infallible).
+    async fn handle_flush_op(&self, io: &mut P::Io) -> Result<HsmOpStatus, OpError> {
+        let session_id = {
+            let sqe = Sqe::from(io.sqe());
+            sqe.validate_flush_op()?;
+            sqe.session_id()
+        };
+        let id = HsmSessId::from(session_id);
+
+        // Tear the session down.  An already-free slot reports
+        // `InvalidArg`; treat that as success so flush stays idempotent.
+        match self.pal().session_destroy(io, id).await {
+            Ok(()) => {}
+            Err(HsmError::InvalidArg) => {}
+            Err(e) => return Err(OpError::new(e, HostStatus::INTERNAL_ERROR)),
+        }
+
+        Ok(HsmOpStatus::new(
+            0,
+            SessionCtrl::Close,
+            Some(session_id),
+            None,
+            true,
         ))
     }
 }

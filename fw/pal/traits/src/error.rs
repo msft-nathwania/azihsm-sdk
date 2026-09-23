@@ -465,6 +465,11 @@ pub enum HsmError {
     /// An exception or interrupt with no dedicated handler reached the
     /// `DefaultHandler`.
     UnexpectedException = 0x08F00003,
+
+    /// A crash was raised deliberately through the explicit-crash path
+    /// (`azihsm_fw_uno_fault::explicit_crash`), rather than by a Rust
+    /// `panic!` or a CPU exception.
+    ExplicitCrash = 0x08F00004,
 }
 
 impl core::fmt::Debug for HsmError {

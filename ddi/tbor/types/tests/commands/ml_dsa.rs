@@ -94,9 +94,9 @@ const WRONG_SIGNING_KEY_LEN: usize = azihsm_ddi_tbor_types::ML_DSA_44_SIGNING_KE
 #[cfg(feature = "mldsa-87")]
 const WRONG_SIGNING_KEY_LEN: usize = azihsm_ddi_tbor_types::ML_DSA_44_SIGNING_KEY_LEN;
 
-use crate::harness::bootstrap_rotated_co;
-use crate::harness::TestCtx;
-use crate::harness::ROTATED_CO_PSK;
+use azihsm_ddi_tbor_test_harness::bootstrap_rotated_co;
+use azihsm_ddi_tbor_test_harness::TestCtx;
+use azihsm_ddi_tbor_test_harness::ROTATED_CO_PSK;
 
 /// A deterministic 32-byte seed, so a failing run is reproducible.
 const SEED: [u8; 32] = [

@@ -14,16 +14,16 @@
 //! Backend is selected at compile time by
 //! [`azihsm_ddi::AzihsmDdi::default`].
 
+use azihsm_ddi_tbor_test_harness::bootstrap_rotated_co;
+use azihsm_ddi_tbor_test_harness::TestCtx;
+use azihsm_ddi_tbor_test_harness::CO_PSK_ID;
+use azihsm_ddi_tbor_test_harness::ROTATED_CO_PSK;
 use azihsm_ddi_tbor_types::SessionType;
 use azihsm_ddi_tbor_types::TborPartInfoReq;
 
 use crate::commands::part_init::known_good_part_policy;
 use crate::commands::part_init::mach_seed;
 use crate::commands::part_init::pota_thumbprint;
-use crate::harness::bootstrap_rotated_co;
-use crate::harness::TestCtx;
-use crate::harness::CO_PSK_ID;
-use crate::harness::ROTATED_CO_PSK;
 
 /// `DdiDeviceKind::Physical` discriminant — uno is a physical device.
 const DEVICE_KIND_PHYSICAL: u8 = 2;
@@ -34,7 +34,7 @@ const PART_STATE_ENABLED: u8 = 2;
 
 /// `PartState::Initializing` discriminant — the state a partition enters
 /// after a successful `PartInit` binds its PTA / policy / POTA thumb.
-const PART_STATE_INITIALIZING: u8 = 4;
+pub(crate) const PART_STATE_INITIALIZING: u8 = 4;
 
 /// Assert the invariant device-level fields PartInfo reports for the
 /// default provisioned partition, plus that the identity public key is

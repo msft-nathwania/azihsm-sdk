@@ -25,10 +25,17 @@
 //! * Policy without `allow_peer_cloning` → `SdPeerCloningNotAllowed`.
 //! * Restore before finalize → `InvalidArg`.
 
+use azihsm_ddi_tbor_test_harness::bootstrap_rotated_co;
+use azihsm_ddi_tbor_test_harness::x509_fixture::make_pta_chain;
+use azihsm_ddi_tbor_test_harness::x509_fixture::pta_pub_from_csr;
+use azihsm_ddi_tbor_test_harness::x509_fixture::CaKey;
+use azihsm_ddi_tbor_test_harness::TestCtx;
+use azihsm_ddi_tbor_test_harness::ROTATED_CO_PSK;
 use azihsm_ddi_tbor_types::PartPolicy;
 use azihsm_ddi_tbor_types::TborSdRestorePeerBackupReq;
 use azihsm_ddi_tbor_types::TborStatus;
 use azihsm_ddi_tbor_types::MASKED_SD_LEN;
+use azihsm_ddi_tbor_types::MASKED_SEALING_KEY_LEN;
 use azihsm_ddi_tbor_types::PART_POLICY_LEN;
 use azihsm_ddi_tbor_types::POK_REMOTE_BACKUP_LEN;
 use azihsm_ddi_tbor_types::SD_MK_BACKUP_LEN;
@@ -40,14 +47,8 @@ use crate::commands::sd_create_peer_backup::create_peer_req;
 use crate::commands::sd_create_peer_backup::finalize_peer_partition;
 use crate::commands::sd_create_remote_backup::backup_request;
 use crate::commands::sd_create_remote_backup::build_receiver_evidence;
-use crate::commands::sd_create_remote_backup::masked_key_and_report;
+use crate::commands::sd_create_remote_backup::masked_key_report_and_pub;
 use crate::commands::sd_create_remote_backup::ReceiverEvidence;
-use crate::harness::bootstrap_rotated_co;
-use crate::harness::x509_fixture::make_pta_chain;
-use crate::harness::x509_fixture::pta_pub_from_csr;
-use crate::harness::x509_fixture::CaKey;
-use crate::harness::TestCtx;
-use crate::harness::ROTATED_CO_PSK;
 
 /// A peer backup produced by the first device's `CreatePeerBackup`,
 /// replayed on the second (rebooted) device to restore the security domain.
@@ -75,8 +76,8 @@ fn create_peer_backup(seed: &[u8], sata: &CaKey, pota: &CaKey) -> PeerBackup {
     let part = finalize_peer_partition(&ctx, seed, sata, pota, true);
     let session_id = part.session.session_id;
 
-    let (masked, report) = masked_key_and_report(&ctx, session_id);
-    let evidence = build_receiver_evidence(&part.pid_pub, sata, &report);
+    let (masked, report, rcvr_pub) = masked_key_report_and_pub(&ctx, session_id);
+    let evidence = build_receiver_evidence(&part.pid_pub, &rcvr_pub, sata, &report);
     let created = ctx
         .tbor_oob(
             &backup_request(session_id, masked.clone(), &evidence, &part.policy),
@@ -156,13 +157,13 @@ fn sd_restore_peer_backup_roundtrip() {
         .tbor_oob(&req, &backup.evidence.oob())
         .expect("SdRestorePeerBackup roundtrip");
 
-    // Local backup (BKS3 masked under PartLocalMK), 180 B, non-zero.
+    // Local backup (BKS3 masked under PartLocalMK), 276 B, non-zero.
     assert_eq!(resp.pok_local_backup.len(), MASKED_SD_LEN);
     assert!(
         resp.pok_local_backup.iter().any(|&b| b != 0),
         "pok_local_backup must not be all-zero",
     );
-    // Refreshed masking-key backup (SDMK re-masked under SDBMK), 164 B.
+    // Refreshed masking-key backup (SDMK re-masked under SDBMK), 260 B.
     assert_eq!(resp.sd_mk_backup.len(), SD_MK_BACKUP_LEN);
     assert!(
         resp.sd_mk_backup.iter().any(|&b| b != 0),
@@ -182,8 +183,8 @@ fn sd_restore_peer_backup_is_one_shot() {
     let part = finalize_peer_partition(&ctx, &mach_seed(), &sata, &pota, true);
     let session_id = part.session.session_id;
 
-    let (masked, report) = masked_key_and_report(&ctx, session_id);
-    let evidence = build_receiver_evidence(&part.pid_pub, &sata, &report);
+    let (masked, report, rcvr_pub) = masked_key_report_and_pub(&ctx, session_id);
+    let evidence = build_receiver_evidence(&part.pid_pub, &rcvr_pub, &sata, &report);
     let created = ctx
         .tbor_oob(
             &backup_request(session_id, masked.clone(), &evidence, &part.policy),
@@ -232,8 +233,8 @@ fn sd_restore_peer_backup_rejects_without_peer_cloning() {
     let part = finalize_peer_partition(&ctx, &mach_seed(), &sata, &pota, false);
     let session_id = part.session.session_id;
 
-    let (masked, report) = masked_key_and_report(&ctx, session_id);
-    let evidence = build_receiver_evidence(&part.pid_pub, &sata, &report);
+    let (masked, report, rcvr_pub) = masked_key_report_and_pub(&ctx, session_id);
+    let evidence = build_receiver_evidence(&part.pid_pub, &rcvr_pub, &sata, &report);
     let backup = PeerBackup {
         masked_sealing_key: masked,
         evidence,
@@ -258,7 +259,7 @@ fn sd_restore_peer_backup_rejects_before_finalize() {
     let session = bootstrap_rotated_co(&ctx, &ROTATED_CO_PSK);
     let req = TborSdRestorePeerBackupReq {
         session_id: session.session_id,
-        masked_sealing_key: [0u8; 180],
+        masked_sealing_key: [0u8; MASKED_SEALING_KEY_LEN],
         policy: PartPolicy::zeroed(),
         src_mfgr_cert_chain: Vec::new(),
         src_owner_cert_chain: Vec::new(),

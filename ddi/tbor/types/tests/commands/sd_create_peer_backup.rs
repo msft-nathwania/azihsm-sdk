@@ -20,11 +20,20 @@
 //! * Policy without `allow_peer_cloning` → `SdPeerCloningNotAllowed`.
 //! * Not finalized → `InvalidArg`.
 
+use azihsm_ddi_tbor_test_harness::bootstrap_rotated_co;
+use azihsm_ddi_tbor_test_harness::x509_fixture::make_pta_chain;
+use azihsm_ddi_tbor_test_harness::x509_fixture::pta_pub_from_csr;
+use azihsm_ddi_tbor_test_harness::x509_fixture::CaKey;
+use azihsm_ddi_tbor_test_harness::x509_fixture::RAW_PUB_LEN;
+use azihsm_ddi_tbor_test_harness::SessionHandshake;
+use azihsm_ddi_tbor_test_harness::TestCtx;
+use azihsm_ddi_tbor_test_harness::ROTATED_CO_PSK;
 use azihsm_ddi_tbor_types::PartPolicy;
 use azihsm_ddi_tbor_types::TborPartInfoReq;
 use azihsm_ddi_tbor_types::TborSdCreatePeerBackupReq;
 use azihsm_ddi_tbor_types::TborStatus;
 use azihsm_ddi_tbor_types::MASKED_SD_LEN;
+use azihsm_ddi_tbor_types::MASKED_SEALING_KEY_LEN;
 use azihsm_ddi_tbor_types::PART_POLICY_LEN;
 use azihsm_ddi_tbor_types::POK_REMOTE_BACKUP_LEN;
 use zerocopy::TryFromBytes;
@@ -34,16 +43,8 @@ use crate::commands::part_init::pota_thumbprint;
 use crate::commands::sd_create_remote_backup::backing_part_policy;
 use crate::commands::sd_create_remote_backup::backup_request;
 use crate::commands::sd_create_remote_backup::build_receiver_evidence;
-use crate::commands::sd_create_remote_backup::masked_key_and_report;
+use crate::commands::sd_create_remote_backup::masked_key_report_and_pub;
 use crate::commands::sd_create_remote_backup::ReceiverEvidence;
-use crate::harness::bootstrap_rotated_co;
-use crate::harness::x509_fixture::make_pta_chain;
-use crate::harness::x509_fixture::pta_pub_from_csr;
-use crate::harness::x509_fixture::CaKey;
-use crate::harness::x509_fixture::RAW_PUB_LEN;
-use crate::harness::SessionHandshake;
-use crate::harness::TestCtx;
-use crate::harness::ROTATED_CO_PSK;
 
 /// Byte offset of the `flags` field in the 484-byte `PartPolicy` image.
 const OFF_FLAGS: usize = 418;
@@ -141,8 +142,8 @@ fn sd_create_peer_backup_roundtrip() {
 
     // Mint + attest a sealing key, then create the security domain to
     // obtain the device-local backup this command re-seals.
-    let (masked, report) = masked_key_and_report(&ctx, session_id);
-    let evidence = build_receiver_evidence(&part.pid_pub, &sata, &report);
+    let (masked, report, rcvr_pub) = masked_key_report_and_pub(&ctx, session_id);
+    let evidence = build_receiver_evidence(&part.pid_pub, &rcvr_pub, &sata, &report);
     let created = ctx
         .tbor_oob(
             &backup_request(session_id, masked.clone(), &evidence, &part.policy),
@@ -181,8 +182,8 @@ fn sd_create_peer_backup_rejects_without_peer_cloning() {
     // A real sealing key + evidence so the request reaches the policy gate;
     // the peer-cloning check fires before any local backup is unmasked, so
     // a zero `pok_local_backup` is sufficient.
-    let (masked, report) = masked_key_and_report(&ctx, session_id);
-    let evidence = build_receiver_evidence(&part.pid_pub, &sata, &report);
+    let (masked, report, rcvr_pub) = masked_key_report_and_pub(&ctx, session_id);
+    let evidence = build_receiver_evidence(&part.pid_pub, &rcvr_pub, &sata, &report);
     let req = create_peer_req(
         session_id,
         &masked,
@@ -201,7 +202,7 @@ fn sd_create_peer_backup_rejects_before_finalize() {
     let session = bootstrap_rotated_co(&ctx, &ROTATED_CO_PSK);
     let req = TborSdCreatePeerBackupReq {
         session_id: session.session_id,
-        masked_sealing_key: [0u8; 180],
+        masked_sealing_key: [0u8; MASKED_SEALING_KEY_LEN],
         policy: PartPolicy::zeroed(),
         dst_mfgr_cert_chain: Vec::new(),
         dst_owner_cert_chain: Vec::new(),

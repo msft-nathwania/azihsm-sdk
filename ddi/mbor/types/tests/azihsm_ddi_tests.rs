@@ -19,6 +19,7 @@ mod integration {
     pub mod close_session;
     pub mod close_session_smoke;
     pub mod common;
+    mod crypto_mldsa_stress;
     pub mod cross_session_key_access_smoke;
     pub mod custom_dispatch;
     pub mod ddi_dev_info;
@@ -30,6 +31,7 @@ mod integration {
     pub mod ecc_sign_compat;
     pub mod ecc_sign_smoke;
     pub mod ecc_sign_stress;
+    pub mod ecc_mldsa_stress;
     pub mod ecc_sign_verify;
     pub mod ecdh_256_key_exchange;
     pub mod ecdh_384_key_exchange;

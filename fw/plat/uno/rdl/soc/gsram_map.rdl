@@ -555,6 +555,10 @@ addrmap key_vault_table_t {
 // Address Map
 // ══════════════════════════════════════════════════════════════
 
+mem mldsa_code_t { mementries = 24576; memwidth = 8; sw = rw; };
+mem mldsa_pool_t { mementries = 38912; memwidth = 8; sw = rw; };
+mem mldsa_payload_t { mementries = 10240; memwidth = 8; sw = rw; };
+
 addrmap io_gsram {
     name = "IO GSRAM";
     desc = "Unified GSRAM address map (2 MiB at 0x6100_0000).";
@@ -589,6 +593,14 @@ addrmap io_gsram {
     ipc_message_t     IPC_ADMIN_HSM_RX_RING[2] @ 0x07014 += 0x40;
     ipc_message_t     IPC_ADMIN_HSM_TX_RING[2] @ 0x07094 += 0x40;
 
+    // HSM-initiated Admin offload (descriptors 12/13).
+    ipc_queue_index_t IPC_HSM_ADMIN_TX_CI @ 0x07EA4;
+    ipc_queue_index_t IPC_HSM_ADMIN_TX_PI @ 0x07EA8;
+    ipc_message_t IPC_HSM_ADMIN_TX_RING[2] @ 0x07EAC += 0x40;
+    ipc_queue_index_t IPC_HSM_ADMIN_RX_CI @ 0x07F2C;
+    ipc_queue_index_t IPC_HSM_ADMIN_RX_PI @ 0x07F30;
+    ipc_message_t IPC_HSM_ADMIN_RX_RING[2] @ 0x07F34 += 0x40;
+
     // ─── IIC (Inbound IO) — 0x20-aligned ───
     isq_entry_t      ISQ[32]            @ 0x0E440 += 0x08;
     icq_entry_t      ICQ[32]            @ 0x0E540 += 0x10;
@@ -614,6 +626,11 @@ addrmap io_gsram {
     // ─── Heap (per-IO buffers) — 33 slots: 0..31 host (IIC), 32 admin ───
     io_meta_entry_t  IO_META[33]         @ 0x20C58 += 0x08;
     sram_io_buf_t    SRAM_IO_BUF[33]     @ 0x20D60 += 0x4000;
+
+    // Runtime reservation for the Admin ML-DSA POC; no per-IO allocator may use it.
+    mldsa_code_t MLDSA_CODE @ 0xA5000;
+    mldsa_pool_t MLDSA_POOL @ 0xAB000;
+    mldsa_payload_t MLDSA_PAYLOAD @ 0xB4800;
 
     // ─── Partition persistent store (65 entries, 3072 B each) ───
     part_store_t     PART_STORE[65]      @ 0xBB000 += 0xC00;

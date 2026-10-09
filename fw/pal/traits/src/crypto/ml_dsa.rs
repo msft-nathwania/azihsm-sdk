@@ -5,8 +5,7 @@
 //!
 //! Unlike the other crypto traits here, this one exists because the
 //! operations may not run on the core that receives the request at all. On
-//! uno they are performed by FP1, which has the RAM for them and whose
-//! wolfCrypt implementation is the one that can ship; the std platform runs
+//! uno they are performed by CP0 Admin using wolfCrypt; the std platform runs
 //! them in process. The command handlers are identical either way, which is
 //! the point of putting this behind a trait rather than behind a `cfg`.
 //!
@@ -21,8 +20,8 @@
 //! # Latency
 //!
 //! These are slow by the standards of everything else in this trait family.
-//! An ML-DSA-87 signature measured a 461 ms median and 1,345 ms worst case on
-//! FP1. They are `async` so the executor keeps running, but a caller should
+//! Admin signing can take hundreds of milliseconds; worst-case latency is
+//! not established. They are `async` so the executor keeps running, but a caller should
 //! not assume any of them is cheap.
 
 use crate::HsmIo;

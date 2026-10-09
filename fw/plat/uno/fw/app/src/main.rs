@@ -99,23 +99,6 @@ async fn poll_io(spawner: Spawner) -> ! {
             continue;
         };
 
-        // Channel test: fire one empty IPC to FP1 on the first host IO.
-        //
-        // get_api_rev passes 3/3 with the FP data path parked, so host IO
-        // reaches uno and this trigger does fire. No payload and no TCM write
-        // -- this establishes only whether a CP1 -> FP1 message lands.
-        #[cfg(feature = "mldsa-fp-probe")]
-        {
-            use core::sync::atomic::AtomicBool;
-            use core::sync::atomic::Ordering;
-            static PROBED: AtomicBool = AtomicBool::new(false);
-            if !PROBED.swap(true, Ordering::Relaxed) {
-                if let Ok(token) = mldsa_fp_probe() {
-                    spawner.spawn(token);
-                }
-            }
-        }
-
         let Ok(token) = handle_io(io) else {
             continue;
         };
@@ -369,61 +352,4 @@ async fn main(spawner: Spawner) {
 
     hsm.pal().run().await;
     hsm.pal().deinit();
-}
-
-/// Issues one ML-DSA keygen request to FP1 and reports what came back.
-///
-/// Keygen is the right first probe: the request is a 32-byte seed, the
-/// smallest payload of the three, and the response is self-checking because
-/// the key lengths are fixed per parameter set (ML-DSA-87: verifying key
-/// 2,592 + signing key 4,896 = 7,488 bytes plus an 8-byte header).
-///
-/// The descriptor travels in the IPC slot; the payload lives at a fixed
-/// address in FP1's DTCM, which the CP addresses at 0xA3200000.
-
-/// Exercises the ML-DSA offload through the PAL shim rather than by hand.
-///
-/// Everything here used to be open-coded: payload layout, descriptor
-/// marshalling, the in-place reshapes between operations. That now lives in
-/// `mldsa_fp`, and this is what remains -- which is the point. If this
-/// produces the same digests the hand-rolled version did, the shim is a
-/// faithful replacement for it.
-#[cfg(feature = "mldsa-fp-probe")]
-#[embassy_executor::task]
-async fn mldsa_fp_probe() {
-    const VK_LEN: usize = 2592;
-    const SK_LEN: usize = 4896;
-    const SIG_LEN: usize = 4627;
-
-    let hsm = HSM.get().await;
-    let pal = hsm.pal();
-
-    let mut seed = [0u8; 32];
-    for (i, b) in seed.iter_mut().enumerate() {
-        *b = i as u8;
-    }
-    let msg: [u8; 32] = core::array::from_fn(|i| 0xA5u8.wrapping_add(i as u8));
-
-    let mut vk = [0u8; VK_LEN];
-    let mut sk = [0u8; SK_LEN];
-    let mut sig = [0u8; SIG_LEN];
-
-    if pal.ml_dsa_fp_keygen(&seed, &mut vk, &mut sk).await.is_err() {
-        return;
-    }
-
-    if pal.ml_dsa_fp_sign(&sk, &msg, &mut sig).await.is_err() {
-        return;
-    }
-
-    // FP1 logs its own verify result, so the value is not needed here -- what
-    // matters is that the request is well formed enough to be answered.
-    let _ = pal.ml_dsa_fp_verify(&vk, &sig, &msg).await;
-
-    // Negative control, as before: one flipped message bit must flip the
-    // answer. Without it a verify stub that always said "valid" would be
-    // indistinguishable from a working one.
-    let mut bad = msg;
-    bad[0] ^= 0x01;
-    let _ = pal.ml_dsa_fp_verify(&vk, &sig, &bad).await;
 }

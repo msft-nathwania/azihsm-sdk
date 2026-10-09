@@ -59,6 +59,7 @@ use azihsm_fw_uno_drivers_sha::ShaDriver;
 use azihsm_fw_uno_drivers_systick as systick_driver;
 use azihsm_fw_uno_drivers_upka::UpkaDriver;
 use azihsm_fw_uno_pac::Interrupt;
+use azihsm_fw_uno_reg_soc::io_gsram as mldsa_gsram;
 use azihsm_fw_uno_reg_soc::io_gsram::GDMA_CQ_OFFSET;
 use azihsm_fw_uno_reg_soc::io_gsram::GDMA_CQ_TAIL_SHADOW_OFFSET;
 use azihsm_fw_uno_reg_soc::io_gsram::GDMA_SQ_OFFSET;
@@ -122,7 +123,7 @@ pub enum BootPhase {
 const IO_QUEUE_DEPTH: usize = 32;
 
 /// Number of IPC pairs configured for the firmware.
-const IPC_PAIRS: usize = 3;
+const IPC_PAIRS: usize = 4;
 
 /// IPC channel identifiers.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -132,9 +133,10 @@ pub enum IpcChannel {
     AdminMessage = 0,
     /// Admin → HSM event notifications.
     AdminEvent = 1,
-    /// HSM → FP1 requests, FP1 → HSM responses (ML-DSA offload).
     /// HSM → FP bulk-key requests (with response).
     FpMessage = 2,
+    /// HSM requests to Admin ML-DSA service.
+    AdminMlDsa = 3,
 }
 
 // ── NVIC wake dispatch ─────────────────────────────────────────
@@ -317,6 +319,10 @@ pub struct UnoHsmPal {
     /// being torn down can't be registered with the engine after the
     /// session's engine-side delete (see `vault.rs`).
     pub(crate) fp_bulk_lock: Mutex<NoopRawMutex, ()>,
+    /// Serializes the entire ML-DSA shared-payload transaction.
+    pub(crate) mldsa_lock: Mutex<NoopRawMutex, ()>,
+    pub(crate) mldsa_in_flight: Cell<bool>,
+    pub(crate) mldsa_seq: Cell<u8>,
 }
 
 // SAFETY: UnoHsmPal is only accessed from a single-threaded Embassy
@@ -406,6 +412,19 @@ impl Default for UnoHsmPal {
                     depth: HSM_TO_FP_IPC_TX_RING_COUNT as u16,
                     msg_len: (HSM_TO_FP_IPC_TX_RING_STRIDE / 4) as u16,
                 },
+                IpcPairConfig {
+                    kind: IpcPairKind::SendMessage,
+                    outbound_desc: 12,
+                    inbound_desc: 13,
+                    tx_ring_base: IO_GSRAM_BASE + mldsa_gsram::IPC_HSM_ADMIN_TX_RING_OFFSET,
+                    tx_ci: IO_GSRAM_BASE + mldsa_gsram::IPC_HSM_ADMIN_TX_CI_OFFSET,
+                    tx_pi: IO_GSRAM_BASE + mldsa_gsram::IPC_HSM_ADMIN_TX_PI_OFFSET,
+                    rx_ring_base: IO_GSRAM_BASE + mldsa_gsram::IPC_HSM_ADMIN_RX_RING_OFFSET,
+                    rx_ci: IO_GSRAM_BASE + mldsa_gsram::IPC_HSM_ADMIN_RX_CI_OFFSET,
+                    rx_pi: IO_GSRAM_BASE + mldsa_gsram::IPC_HSM_ADMIN_RX_PI_OFFSET,
+                    depth: mldsa_gsram::IPC_HSM_ADMIN_TX_RING_COUNT as u16,
+                    msg_len: (mldsa_gsram::IPC_HSM_ADMIN_TX_RING_STRIDE / 4) as u16,
+                },
             ],
         };
 
@@ -422,6 +441,9 @@ impl Default for UnoHsmPal {
             io_alloc: IO_ALLOC_INIT,
             io_peak: IO_ALLOC_INIT,
             fp_bulk_lock: Mutex::new(()),
+            mldsa_lock: Mutex::new(()),
+            mldsa_in_flight: Cell::new(false),
+            mldsa_seq: Cell::new(0),
         }
     }
 }
@@ -819,6 +841,18 @@ impl HsmPal for UnoHsmPal {
         self.ipc.enable(IpcChannel::AdminMessage as u8);
         self.ipc.enable(IpcChannel::AdminEvent as u8);
         self.ipc.enable(IpcChannel::FpMessage as u8);
+        {
+            // Match reference HSM ownership: reset only our transmit queue,
+            // then align the response consumer to Admin's response producer.
+            unsafe {
+                ((IO_GSRAM_BASE + mldsa_gsram::IPC_HSM_ADMIN_TX_PI_OFFSET) as *mut u32)
+                    .write_volatile(0);
+                ((IO_GSRAM_BASE + mldsa_gsram::IPC_HSM_ADMIN_TX_CI_OFFSET) as *mut u32)
+                    .write_volatile(0);
+            }
+            self.ipc.drain(IpcChannel::AdminMlDsa as u8);
+            self.ipc.enable(IpcChannel::AdminMlDsa as u8);
+        }
         // The HSM owns initialization of the HSM↔backend ring indices (the
         // reference firmware zeroes them at channel setup).  Clear all
         // four so the send/recv PI/CI comparisons start from a known
